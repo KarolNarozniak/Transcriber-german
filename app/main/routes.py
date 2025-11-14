@@ -4,6 +4,7 @@ import shutil
 from flask import Blueprint, render_template, redirect, url_for, flash, request, send_from_directory, current_app, jsonify
 from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
+from markupsafe import escape
 
 from ..extensions import db
 from ..models import Lesson, AudioFile, Note, LiveTranscript
@@ -246,10 +247,21 @@ def stream_stop(lesson_id):
     if live_id is not None:
         lt = LiveTranscript.query.get(live_id)
         if lt and lt.lesson_id == lesson.id:
-            # utwórz notatkę z końcowej transkrypcji
+            # utwórz notatkę z końcowej transkrypcji: wygeneruj podsumowanie i notatki
             full_text = (lt.text or "").strip()
             if full_text:
-                note = Note(lesson_id=lesson.id, summary=full_text, notes="")
+                try:
+                    summary, bullets = generate_notes_from_text(full_text)
+                except Exception:
+                    summary, bullets = "", ""
+                # dodaj rozwijany transkrypt poniżej notatek
+                transcript_block = (
+                    "<details><summary>Transkrypt (pokaż/ukryj)</summary>"
+                    f"<pre style='white-space: pre-wrap;'>{escape(full_text)}</pre>"
+                    "</details>"
+                )
+                combined_notes = (bullets or "") + ("\n\n" if bullets else "") + transcript_block
+                note = Note(lesson_id=lesson.id, summary=summary or "Podsumowanie lekcji", notes=combined_notes)
                 db.session.add(note)
                 db.session.commit()
                 note_id = note.id
