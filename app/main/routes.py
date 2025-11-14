@@ -1,12 +1,13 @@
 import os
 from datetime import datetime
+import shutil
 from flask import Blueprint, render_template, redirect, url_for, flash, request, send_from_directory, current_app, jsonify
 from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
 
 from ..extensions import db
 from ..models import Lesson, AudioFile, Note, LiveTranscript
-from .forms import CreateLessonForm, UploadAudioForm
+from .forms import CreateLessonForm, UploadAudioForm, RenameLessonForm, DeleteLessonForm
 from ..services.openai_client import transcribe_audio_file, generate_notes_from_text
 
 
@@ -23,7 +24,9 @@ def allowed_file(filename: str) -> bool:
 def dashboard():
     lessons = Lesson.query.filter_by(user_id=current_user.id).order_by(Lesson.created_at.desc()).all()
     form = CreateLessonForm()
-    return render_template("main/dashboard.html", lessons=lessons, form=form)
+    rename_form = RenameLessonForm()
+    delete_form = DeleteLessonForm()
+    return render_template("main/dashboard.html", lessons=lessons, form=form, rename_form=rename_form, delete_form=delete_form)
 
 
 @main_bp.route("/lesson/create", methods=["POST"]) 
@@ -45,6 +48,64 @@ def create_lesson():
         flash("Lekcja utworzona.", "success")
         return redirect(url_for("main.view_lesson", lesson_id=lesson.id))
     flash("Nie udało się utworzyć lekcji.", "danger")
+    return redirect(url_for("main.dashboard"))
+
+
+@main_bp.route("/lesson/<int:lesson_id>/rename", methods=["POST"]) 
+@login_required
+def rename_lesson(lesson_id):
+    lesson = Lesson.query.filter_by(id=lesson_id, user_id=current_user.id).first_or_404()
+    form = RenameLessonForm()
+    if form.validate_on_submit():
+        new_title = form.title.data.strip()
+        try:
+            base_dir = os.path.dirname(lesson.folder_path)
+            old_name = os.path.basename(lesson.folder_path)
+            if "_" in old_name:
+                ts_prefix = old_name.split("_", 1)[0]
+            else:
+                ts_prefix = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+            new_folder = f"{ts_prefix}_{secure_filename(new_title)}"
+            new_path = os.path.join(base_dir, new_folder)
+            if os.path.abspath(new_path) != os.path.abspath(lesson.folder_path):
+                if not os.path.exists(new_path):
+                    os.rename(lesson.folder_path, new_path)
+                lesson.folder_path = new_path
+            lesson.title = new_title
+            db.session.commit()
+            flash("Zmieniono nazwę lekcji.", "success")
+        except Exception as e:
+            db.session.rollback()
+            flash(f"Nie udało się zmienić nazwy: {e}", "danger")
+    else:
+        flash("Niepoprawna nazwa.", "warning")
+    return redirect(url_for("main.dashboard"))
+
+
+@main_bp.route("/lesson/<int:lesson_id>/delete", methods=["POST"]) 
+@login_required
+def delete_lesson(lesson_id):
+    lesson = Lesson.query.filter_by(id=lesson_id, user_id=current_user.id).first_or_404()
+    form = DeleteLessonForm()
+    if form.validate_on_submit():
+        try:
+            user_dir = os.path.join(current_app.config["DATA_DIR"], str(current_user.id))
+            abs_user_dir = os.path.abspath(user_dir)
+            abs_lesson_dir = os.path.abspath(lesson.folder_path)
+            if abs_lesson_dir.startswith(abs_user_dir) and os.path.isdir(abs_lesson_dir):
+                shutil.rmtree(abs_lesson_dir, ignore_errors=True)
+
+            AudioFile.query.filter_by(lesson_id=lesson.id).delete()
+            Note.query.filter_by(lesson_id=lesson.id).delete()
+            LiveTranscript.query.filter_by(lesson_id=lesson.id).delete()
+            db.session.delete(lesson)
+            db.session.commit()
+            flash("Lekcja została usunięta.", "success")
+        except Exception as e:
+            db.session.rollback()
+            flash(f"Nie udało się usunąć lekcji: {e}", "danger")
+    else:
+        flash("Nie udało się potwierdzić usunięcia.", "warning")
     return redirect(url_for("main.dashboard"))
 
 
@@ -174,10 +235,25 @@ def live_text(live_id):
 @main_bp.route("/api/lesson/<int:lesson_id>/stream/stop", methods=["POST"])
 @login_required
 def stream_stop(lesson_id):
-    # na razie tylko potwierdzenie – fragmenty i tekst zostają w bazie/dysk
+    # Zapisz końcowy tekst z LiveTranscript jako notatkę (summary) i zwróć note_id
     lesson = Lesson.query.filter_by(id=lesson_id, user_id=current_user.id).first_or_404()
-    live_id = request.json.get("live_id") if request.is_json else request.form.get("live_id")
-    return jsonify({"ok": True, "live_id": live_id})
+    live_id_raw = request.json.get("live_id") if request.is_json else request.form.get("live_id")
+    try:
+        live_id = int(live_id_raw) if live_id_raw is not None else None
+    except Exception:
+        live_id = None
+    note_id = None
+    if live_id is not None:
+        lt = LiveTranscript.query.get(live_id)
+        if lt and lt.lesson_id == lesson.id:
+            # utwórz notatkę z końcowej transkrypcji
+            full_text = (lt.text or "").strip()
+            if full_text:
+                note = Note(lesson_id=lesson.id, summary=full_text, notes="")
+                db.session.add(note)
+                db.session.commit()
+                note_id = note.id
+    return jsonify({"ok": True, "live_id": live_id, "note_id": note_id})
 
 
 @main_bp.route("/api/lesson/<int:lesson_id>/record/upload", methods=["POST"]) 

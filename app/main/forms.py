@@ -11,3 +11,12 @@ class CreateLessonForm(FlaskForm):
 class UploadAudioForm(FlaskForm):
     file = FileField("Plik audio", validators=[DataRequired()])
     submit = SubmitField("Wyślij")
+
+
+class RenameLessonForm(FlaskForm):
+    title = StringField("Nowa nazwa lekcji", validators=[DataRequired(), Length(min=2, max=200)])
+    submit = SubmitField("Zapisz")
+
+
+class DeleteLessonForm(FlaskForm):
+    submit = SubmitField("Usuń lekcję")

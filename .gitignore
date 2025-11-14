@@ -6,6 +6,7 @@ __pycache__/
 *.so
 .env
 .env.*
+.venv/
 venv/
 .env.local
 instance/
