@@ -4,12 +4,13 @@ from .config import Config
 from .extensions import db, login_manager
 from .models import User
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 
 
 def create_app():
-    # Wczytaj zmienne środowiskowe z .env (jeśli istnieje)
-    load_dotenv()
+    # Wczytaj zmienne środowiskowe z .env niezależnie od katalogu roboczego
+    # find_dotenv() przeszukuje nadrzędne katalogi i znajdzie plik w root repo
+    load_dotenv(find_dotenv(), override=False)
 
     app = Flask(__name__, instance_relative_config=True, static_folder="static")
     app.config.from_object(Config())
