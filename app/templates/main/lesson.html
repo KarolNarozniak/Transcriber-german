@@ -1,0 +1,103 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>Lekcja: {{ lesson.title }}</h2>
+
+<div class="row g-4">
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-header">Prześlij plik audio</div>
+      <div class="card-body">
+        <form method="post" action="{{ url_for('main.upload_audio', lesson_id=lesson.id) }}" enctype="multipart/form-data">
+          {{ upload_form.hidden_tag() }}
+          <div class="mb-3">{{ upload_form.file(class_='form-control') }}</div>
+          {{ upload_form.submit(class_='btn btn-primary') }}
+        </form>
+        <hr>
+        <a class="btn btn-outline-secondary" href="{{ url_for('main.record_page', lesson_id=lesson.id) }}">Nagraj mikrofonem</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Transkrypcje</span>
+        <button id="genNotesBtn" class="btn btn-sm btn-success" {% if not audio_files %}disabled{% endif %}>Generuj notatki</button>
+      </div>
+      <div class="card-body">
+        {% if audio_files %}
+          {% for a in audio_files %}
+            <div class="border rounded p-2 mb-3">
+              <div class="d-flex justify-content-between align-items-center">
+                <div>
+                  <strong>{{ a.filename }}</strong>
+                  <div class="text-muted small">{{ a.created_at.strftime('%Y-%m-%d %H:%M') }}</div>
+                </div>
+                <div class="btn-group">
+                  <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.download_audio', audio_id=a.id) }}" target="_blank">Pobierz</a>
+                  <button class="btn btn-sm btn-primary btn-transcribe" data-audio-id="{{ a.id }}">Transkrybuj</button>
+                </div>
+              </div>
+              {% if a.transcription_text %}
+                <details class="mt-2" open>
+                  <summary>Tekst</summary>
+                  <pre class="mt-2" style="white-space: pre-wrap;">{{ a.transcription_text }}</pre>
+                </details>
+              {% else %}
+                <div class="text-muted small mt-2">Brak transkrypcji.</div>
+              {% endif %}
+            </div>
+          {% endfor %}
+        {% else %}
+          <p>Brak plików audio.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card mt-4">
+  <div class="card-header">Notatki</div>
+  <div class="card-body" id="notesBox">
+    {% if notes %}
+      {% for n in notes %}
+        <div class="mb-4">
+          <h5>Podsumowanie</h5>
+          <p>{{ n.summary }}</p>
+          <h5>Notatki</h5>
+          <div class="markdown">{{ n.notes | safe }}</div>
+          <div class="text-muted small">Utworzone: {{ n.created_at.strftime('%Y-%m-%d %H:%M') }}</div>
+        </div>
+      {% endfor %}
+    {% else %}
+      <p>Brak notatek. Wygeneruj je z transkrypcji.</p>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+// Odłącz inline JS, dodaj nasłuchiwacze by uniknąć lint błędów
+document.querySelectorAll('.btn-transcribe').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const id = btn.getAttribute('data-audio-id');
+    btn.disabled = true; const old = btn.textContent; btn.textContent = 'Transkrybuję...';
+    const res = await fetch(`{{ url_for('main.api_transcribe', audio_id=0) }}`.replace('0', id), {method: 'POST'});
+    const data = await res.json();
+    if (data.error) { alert(data.error); } else { location.reload(); }
+    btn.disabled = false; btn.textContent = old;
+  })
+});
+
+const genBtn = document.getElementById('genNotesBtn');
+if (genBtn) {
+  genBtn.addEventListener('click', async () => {
+    genBtn.disabled = true; genBtn.textContent = 'Generuję...';
+    const res = await fetch(`{{ url_for('main.api_generate_notes', lesson_id=lesson.id) }}`, {method: 'POST'});
+    const data = await res.json();
+    if (data.error) { alert(data.error); }
+    else { location.reload(); }
+    genBtn.disabled = false; genBtn.textContent = 'Generuj notatki';
+  });
+}
+</script>
+{% endblock %}

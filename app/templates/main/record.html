@@ -1,0 +1,25 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>Nagrywanie mikrofonu – {{ lesson.title }}</h2>
+<p class="text-muted">Nagraj fragment lekcji i wyślij do transkrypcji. Pliki są zapisywane w katalogu lekcji.</p>
+
+<div class="d-flex gap-2 mb-3">
+  <button id="startBtn" class="btn btn-primary">Start</button>
+  <button id="stopBtn" class="btn btn-secondary" disabled>Stop</button>
+</div>
+
+<audio id="player" controls class="w-100" style="display:none"></audio>
+
+<div class="mt-4">
+  <h5>Transkrypcja na żywo</h5>
+  <pre id="liveText" style="white-space: pre-wrap;"></pre>
+  <div id="lessonCtx" data-lesson-id="{{ lesson.id }}"></div>
+  <div class="text-muted small">Fragmenty audio są zapisywane w katalogu lekcji (live_...).</div>
+</div>
+
+<div class="mt-3">
+  <button id="uploadBtn" class="btn btn-success" disabled>Wyślij i transkrybuj</button>
+</div>
+
+<script src="{{ url_for('static', filename='js/record.js') }}"></script>
+{% endblock %}
