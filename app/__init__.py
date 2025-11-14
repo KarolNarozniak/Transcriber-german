@@ -1,10 +1,12 @@
 import os
+from datetime import datetime
 from flask import Flask
 from .config import Config
 from .extensions import db, login_manager
 from .models import User
 
 from dotenv import load_dotenv, find_dotenv
+from sqlalchemy.exc import IntegrityError
 
 
 def create_app():
@@ -25,20 +27,35 @@ def create_app():
     # Tworzenie bazy danych przy pierwszym uruchomieniu
     with app.app_context():
         db.create_all()
-        # Opcjonalne seedowanie użytkowników z .env (email:haslo;...)
+        # Bezpieczne seedowanie użytkowników z .env (email:haslo;...) tylko raz
         seeded = app.config.get("AUTH_SEEDED_USERS", "")
         if seeded:
-            pairs = [p.strip() for p in seeded.replace(",", ";").split(";") if p.strip()]
-            for pair in pairs:
-                if ":" in pair:
-                    email, pwd = pair.split(":", 1)
-                    email = email.strip().lower()
-                    pwd = pwd.strip()
-                    if email and pwd and not User.query.filter_by(email=email).first():
-                        u = User(email=email)
-                        u.set_password(pwd)
-                        db.session.add(u)
-            db.session.commit()
+            seed_marker = os.path.join(app.config["DATA_DIR"], ".seed_done")
+            if not os.path.exists(seed_marker):
+                pairs = [p.strip() for p in seeded.replace(",", ";").split(";") if p.strip()]
+                for pair in pairs:
+                    if ":" in pair:
+                        email, pwd = pair.split(":", 1)
+                        email = email.strip().lower()
+                        pwd = pwd.strip()
+                        if not email or not pwd:
+                            continue
+                        try:
+                            # Spróbuj wstawić; jeśli już istnieje (wyścig między workerami) – zignoruj
+                            if not User.query.filter_by(email=email).first():
+                                u = User(email=email)
+                                u.set_password(pwd)
+                                db.session.add(u)
+                                db.session.commit()
+                        except IntegrityError:
+                            db.session.rollback()
+                            # inny worker zdążył – ignorujemy
+                # Zapisz marker, aby nie seedować ponownie przy kolejnych restartach
+                try:
+                    with open(seed_marker, "w", encoding="utf-8") as fh:
+                        fh.write(f"seeded_at={datetime.utcnow().isoformat()}\n")
+                except Exception:
+                    pass
 
     # Rejestracja blueprintów
     from .auth.routes import auth_bp
